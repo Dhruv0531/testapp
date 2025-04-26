@@ -41,18 +41,24 @@ class _HomePageState extends State<HomePage> {
     }
 
     return query.snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return Task(
-          id: doc.id,
-          title: data['title'] ?? 'Untitled',
-          description: data['description'] ?? '',
-          date: (data['duedate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-          category: data['category'] ?? 'Others',
-          isCompleted: data['completed'] ?? false,
-          progress: (data['progress'] as num?)?.toDouble() ?? 0.0,
-        );
-      }).toList();
+      final taskList =
+          snapshot.docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return Task(
+              id: doc.id,
+              title: data['title'] ?? 'Untitled',
+              description: data['description'] ?? '',
+              date: (data['duedate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              category: data['category'] ?? 'Others',
+              isCompleted: data['completed'] ?? false,
+              progress: (data['progress'] as num?)?.toDouble() ?? 0.0,
+            );
+          }).toList();
+
+      taskList.sort(
+        (a, b) => a.date.compareTo(b.date),
+      ); // Sort tasks by due date
+      return taskList;
     });
   }
 
@@ -65,7 +71,6 @@ class _HomePageState extends State<HomePage> {
                 .collection('user_info')
                 .doc(user.uid)
                 .get();
-
         if (userDoc.exists) {
           setState(() {
             userName = userDoc['username'] ?? "User";
@@ -91,6 +96,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  double _calculateProgress(List<Task> tasks) {
+    if (tasks.isEmpty) return 0.0;
+    final completed = tasks.where((task) => task.isCompleted).length;
+    return completed / tasks.length;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -106,10 +117,18 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(height: 20),
               _buildDateDisplay(),
               const SizedBox(height: 20),
-              _buildCategoryDropdown(),
-              const SizedBox(height: 15),
-              _buildTaskOverview(),
-              const SizedBox(height: 15),
+              _buildCategorySubfolders(),
+              const SizedBox(height: 20),
+              StreamBuilder<List<Task>>(
+                stream: _fetchTasks(_selectedCategory),
+                builder: (context, snapshot) {
+                  final tasks = snapshot.data ?? [];
+                  final progress = _calculateProgress(tasks);
+
+                  return _buildTaskOverview(progress);
+                },
+              ),
+              const SizedBox(height: 10),
               Expanded(
                 child: StreamBuilder<List<Task>>(
                   stream: _fetchTasks(_selectedCategory),
@@ -146,46 +165,50 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentNavIndex,
-        onTap: (index) {
-          setState(() {
-            _currentNavIndex = index;
-          });
+      bottomNavigationBar: BottomAppBar(
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8,
+        child: BottomNavigationBar(
+          currentIndex: _currentNavIndex,
+          onTap: (index) {
+            setState(() {
+              _currentNavIndex = index;
+            });
 
-          if (index == 1) _navigateToCalendarPage();
-          if (index == 2) _navigateToAddTaskPage();
-          if (index == 3) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => SettingsPage(userName: userName),
-              ),
-            );
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_rounded),
-            label: "Home",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.calendar_month_rounded),
-            label: "Calendar",
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.add_circle), label: "Add"),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: "Settings",
-          ),
-        ],
-        selectedItemColor: Colors.purple,
-        unselectedItemColor: Colors.grey,
+            if (index == 1) _navigateToCalendarPage();
+            if (index == 2) _navigateToAddTaskPage();
+            if (index == 3) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => SettingsPage(userName: userName),
+                ),
+              );
+            }
+          },
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_rounded),
+              label: "Home",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.calendar_month_rounded),
+              label: "Calendar",
+            ),
+            BottomNavigationBarItem(icon: Icon(Icons.add_circle), label: "Add"),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.settings),
+              label: "Settings",
+            ),
+          ],
+          selectedItemColor: Colors.purple,
+          unselectedItemColor: Colors.grey,
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _navigateToAddTaskPage,
         backgroundColor: Colors.purple,
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add, size: 32),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
     );
@@ -245,7 +268,50 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildTaskOverview() {
+  Widget _buildCategorySubfolders() {
+    return SizedBox(
+      height: 50,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: categories.length,
+        itemBuilder: (context, index) {
+          final category = categories[index];
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedCategory = category;
+              });
+            },
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color:
+                    _selectedCategory == category
+                        ? Colors.purple
+                        : Colors.grey[200],
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Center(
+                child: Text(
+                  category,
+                  style: TextStyle(
+                    color:
+                        _selectedCategory == category
+                            ? Colors.white
+                            : Colors.black,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTaskOverview(double progress) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -259,37 +325,44 @@ class _HomePageState extends State<HomePage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Column(
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                "Today's Task",
+              const Text(
+                "Today's Progress",
                 style: TextStyle(fontSize: 16, color: Colors.white),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               Text(
-                "Almost Done!",
-                style: TextStyle(
+                "${(progress * 100).toStringAsFixed(0)}% completed",
+                style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
               ),
-              SizedBox(height: 5),
+              const SizedBox(height: 5),
               Text(
-                "85% completed",
-                style: TextStyle(fontSize: 14, color: Colors.white70),
+                progress >= 1.0 ? "All tasks done! 🎉" : "Keep going!",
+                style: const TextStyle(fontSize: 14, color: Colors.white70),
               ),
             ],
           ),
           SizedBox(
             height: 70,
             width: 70,
-            child: CircularProgressIndicator(
-              value: 0.85,
-              strokeWidth: 6,
-              backgroundColor: Colors.white24,
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+            child: TweenAnimationBuilder(
+              tween: Tween(begin: 0.0, end: progress),
+              duration: const Duration(milliseconds: 500),
+              builder:
+                  (context, value, _) => CircularProgressIndicator(
+                    value: value,
+                    strokeWidth: 6,
+                    backgroundColor: Colors.white24,
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Colors.white,
+                    ),
+                  ),
             ),
           ),
         ],
@@ -297,103 +370,132 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildCategoryDropdown() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey[200],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: DropdownButton<String>(
-        value: _selectedCategory,
-        isExpanded: true,
-        underline: Container(),
-        icon: const Icon(Icons.keyboard_arrow_down),
-        items:
-            categories.map((String category) {
-              return DropdownMenuItem<String>(
-                value: category,
-                child: Text(category),
-              );
-            }).toList(),
-        onChanged: (String? newValue) {
-          setState(() {
-            _selectedCategory = newValue!;
-          });
-        },
-      ),
-    );
-  }
-
   Widget _buildTaskCard(Task task) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       child: ListTile(
-        contentPadding: const EdgeInsets.all(15),
-        leading: Icon(
-          task.isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-          color: task.isCompleted ? Colors.green : Colors.grey,
-          size: 30,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    task.title,
+                    style: TextStyle(
+                      decoration:
+                          task.isCompleted ? TextDecoration.lineThrough : null,
+                      color: task.isCompleted ? Colors.grey : Colors.black,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  _getPriority(task.date),
+                  style: TextStyle(
+                    color:
+                        task.date.isBefore(DateTime.now())
+                            ? Colors.red
+                            : task.date.isBefore(
+                              DateTime.now().add(const Duration(days: 7)),
+                            )
+                            ? Colors.orange
+                            : Colors.green,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
+                const SizedBox(width: 4),
+                Text(
+                  "Due: ${_formatDueDate(task.date)}",
+                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+              ],
+            ),
+          ],
         ),
-        title: Text(
-          task.title,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        subtitle: Text(task.description),
+        trailing: Checkbox(
+          value: task.isCompleted,
+          onChanged: (bool? value) async {
+            if (value != null) {
+              await FirebaseFirestore.instance
+                  .collection('tasks')
+                  .doc(task.id)
+                  .update({'completed': value});
+              if (value) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('✅ Task Completed!'),
+                    backgroundColor: Colors.green,
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              }
+            }
+          },
         ),
-        subtitle: Text("Due: ${_formatDate(task.date)}"),
-        onTap: () {
-          final updatedTask = task.copyWith(isCompleted: !task.isCompleted);
-          FirebaseFirestore.instance.collection('tasks').doc(task.id).update({
-            'completed': updatedTask.isCompleted,
-          });
-        },
       ),
     );
   }
 
-  Widget _circleIcon(IconData iconData) {
+  String _formatDueDate(DateTime date) {
+    return "${date.day}/${date.month}/${date.year}";
+  }
+
+  String _getPriority(DateTime dueDate) {
+    final now = DateTime.now();
+    if (dueDate.isBefore(now)) return "High";
+    if (dueDate.isBefore(now.add(const Duration(days: 7)))) return "Medium";
+    return "Low";
+  }
+
+  Widget _circleIcon(IconData icon) {
     return Container(
-      height: 45,
-      width: 45,
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.purple.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.grey[200],
+        shape: BoxShape.circle,
       ),
-      child: Icon(iconData, color: Colors.purple[700]),
+      child: Icon(icon, color: Colors.purple),
     );
   }
 
-  String _formatDate(DateTime date) => "${date.day}-${date.month}-${date.year}";
-
-  String _getWeekDayName(int weekDay) {
-    const days = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
+  String _getWeekDayName(int dayIndex) {
+    const weekdays = [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+      "Sunday",
     ];
-    return days[weekDay - 1];
+    return weekdays[dayIndex - 1];
   }
 
-  String _getMonthName(int month) {
+  String _getMonthName(int monthIndex) {
     const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
     ];
-    return months[month - 1];
+    return months[monthIndex - 1];
   }
 }
